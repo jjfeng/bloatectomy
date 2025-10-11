@@ -40,7 +40,7 @@ class bloatectomy():
         self.postgres_table = postgres_table
         self.engine  = postgres_engine
 
-        assert float(sys.version[0:3]) >= 3.7, "Must use python 3.7.0 or higher for the regular expressions to work correctly."
+        # assert float(sys.version[0:3]) >= 3.7, "Must use python 3.7.0 or higher for the regular expressions to work correctly."
 
         try:
             if  input_text.split('.')[1] == 'docx' or input_text.split('.')[1] == 'doc':
@@ -62,13 +62,14 @@ class bloatectomy():
             else:
                 assert type(input_text) == str, "unsupported format"
                 self.input_text = input_text
-                print(style + "ing duplications. Output file = " + path + filename + '.' + output)
+                if output != 'str':
+                    print(style + "ing duplications. Output file = " + path + filename + '.' + output)
                 bloatectomy.main(self)
 
         except IndexError:
             assert type(input_text) == str, "unsupported format"
             self.input_text = input_text
-            print(style + "ing duplications. Output file = " + path + filename + '.' + output)
+            # print(style + "ing duplications. Output file = " + path + filename + '.' + output)
             bloatectomy.main(self)
 
         except AttributeError:
@@ -94,6 +95,8 @@ class bloatectomy():
         bloatectomy.tokenize_mark(self)
         if self.output=='html':
             bloatectomy.make_html(self)
+        elif self.output=='str':
+            bloatectomy.make_str(self)
         else:
             bloatectomy.make_docx(self)
 
@@ -161,6 +164,14 @@ class bloatectomy():
             with open(str(self.path) + str(self.filename) + '_original_token_numbers.txt',"w") as file:
                 for i in self.original_numbered_tokens:
                  file.write(str("$ ".join(i) + '\n'))
+
+    def make_str(self):
+        """Returns the deduplicated text as a string with markup tags removed"""
+        result_tokens = []
+        for token in self.tokens:
+            clean_token = token.replace("<mark>", "").replace("</mark>", "").replace("<b>", "").replace("</b>", "")
+            result_tokens.append(clean_token)
+        self.deduplicated_string = " ".join(result_tokens)
 
     def tokenize2(regex, token_in):
         """
