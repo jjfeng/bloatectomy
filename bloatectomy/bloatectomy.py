@@ -26,7 +26,8 @@ import sys
 class bloatectomy():
     def __init__(self, input_text,  path = '', filename='bloatectomized_file',
                  display=False, style='highlight', output='html', output_numbered_tokens=False, output_original_tokens=False,
-                 regex1=r"(.+?\.[\s\n]+)", regex2=r"(?=\n\s*[A-Z1-9#-]+.*)", postgres_engine=None, postgres_table=None):
+                 regex1=r"(.+?\.[\s\n]+)", regex2=r"(?=\n\s*[A-Z1-9#-]+.*)", postgres_engine=None, postgres_table=None,
+                 str_sep=' ', protected_regex=None):
 
         self.path = path
         self.filename = filename
@@ -39,6 +40,15 @@ class bloatectomy():
         self.regex2 = regex2
         self.postgres_table = postgres_table
         self.engine  = postgres_engine
+        # str_sep: separator used to re-join tokens in make_str (output='str').
+        #   Default ' ' preserves prior behaviour; pass '\n' to keep one token
+        #   per line so the deduplicated string stays readable.
+        self.str_sep = str_sep
+        # protected_regex: tokens matching this regex are never treated as
+        #   duplicates (always kept, never tagged or removed). Useful for short
+        #   structural lines such as timestamped event markers that can
+        #   legitimately recur. Default None preserves prior behaviour.
+        self.protected_regex = re.compile(protected_regex) if protected_regex else None
 
         # assert float(sys.version[0:3]) >= 3.7, "Must use python 3.7.0 or higher for the regular expressions to work correctly."
 
@@ -171,7 +181,7 @@ class bloatectomy():
         for token in self.tokens:
             clean_token = token.replace("<mark>", "").replace("</mark>", "").replace("<b>", "").replace("</b>", "")
             result_tokens.append(clean_token)
-        self.deduplicated_string = " ".join(result_tokens)
+        self.deduplicated_string = self.str_sep.join(result_tokens)
 
     def tokenize2(regex, token_in):
         """
@@ -253,6 +263,10 @@ class bloatectomy():
             #skip any empty tokens
             if token == '':
                 pass
+            # tokens matching protected_regex (e.g. timestamped event lines) can
+            # legitimately recur and must never be removed/tagged as duplicates
+            elif self.protected_regex is not None and self.protected_regex.search(token):
+                yield token
             elif token not in tokens_set:
                 tokens_set_add(token)
                 yield token
