@@ -175,6 +175,12 @@ The regular expression for the first tokenization. Split on a period (.) followe
 **regex2**: str, optional, default=`r"(?=\n\s*[A-Z1-9#-]+.*)"`  
 The regular expression for the second tokenization. Split on any line feed character followed by an uppercase letter, a number, or a dash. This can be replaced with any valid regular expression to change how sub-tokens are created.
 
+**str_sep**: str, optional, default=`' '`
+The separator used to re-join tokens when `output='str'`. The default `' '` (a single space) preserves the original behaviour. Pass `'\n'` to keep one token per line so the deduplicated string retains its line structure and stays readable.
+
+**protected_regex**: str, optional, default=`None`
+A regular expression; any token matching it (via `re.search`) is never treated as a duplicate — it is always kept and never tagged or removed. Useful for short, structural lines that can legitimately recur, such as timestamped event markers (e.g. `protected_regex=r"^\s*\d{1,2}:\d{2}\b"`). The default `None` preserves the original behaviour.
+
 **postgres_engine**: str, optional
 The postgres connection. Only relevant for use with the MIMIC III dataset. When data is pulled from postgres the hadm_id of the file will be appended to the `filename` if set or the default `bloatectomized_file`. See the jupyter notebook [mimic_bloatectomy_example](./bloatectomy_examples/mimic_bloatectomy_example.ipynb) for the example code.
 
