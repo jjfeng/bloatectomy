@@ -23,6 +23,8 @@
 import re
 import sys
 
+NON_WHITESPACE_REGEX = re.compile(r"^\s*(\S.*?)\s*$", flags=re.DOTALL)
+
 class bloatectomy():
     def __init__(self, input_text,  path = '', filename='bloatectomized_file',
                  display=False, style='highlight', output='html', output_numbered_tokens=False, output_original_tokens=False,
@@ -206,17 +208,9 @@ class bloatectomy():
         # Clean each part while preserving the recorded start position
         cleaned = []
         for part, start in parts_with_pos:
-            p = re.sub(r"$\n+", "", part)   # remove from end
-            p = re.sub(r"^\n", "", p)        # remove from front
-            # line feeds + whitespace or not
-            p = re.sub(r"\s+\n\s+", " ", p)
-            p = re.sub(r"\s+\n", " ", p)
-            p = re.sub(r"\n\s+", " ", p)
-            p = re.sub(r"\n", " ", p)
-            # remove trailing whitespace only so the start position stays valid
-            p = p.rstrip(' ')
-            if p != '':
-                cleaned.append((p, token_offset + start))
+            non_ws_span = NON_WHITESPACE_REGEX.search(part)
+            if non_ws_span:
+                cleaned.append((non_ws_span.group(1), token_offset + start + non_ws_span.span(1)[0]))
         return cleaned
 
     def number_tokens(token):
@@ -239,12 +233,10 @@ class bloatectomy():
         pos = 0
         parts_with_pos = []
         for part in raw_parts:
-            parts_with_pos.append((part, pos))
+            non_ws_span = NON_WHITESPACE_REGEX.search(part)
+            if non_ws_span:
+                parts_with_pos.append((non_ws_span.group(1), pos + non_ws_span.span(1)[0]))
             pos += len(part)
-
-        # Apply rstrip (not strip) so leading content — and the recorded start
-        # position — is never shifted by whitespace removal
-        parts_with_pos = [(p.rstrip(' '), start) for p, start in parts_with_pos]
 
         new_tok_with_pos = []
         for t, offset in parts_with_pos:
