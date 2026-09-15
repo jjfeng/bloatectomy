@@ -23,6 +23,8 @@
 import re
 import sys
 
+NON_WHITESPACE_REGEX = re.compile(r"^\s*(\S.*?)\s*$", flags=re.DOTALL)
+
 class bloatectomy():
     def __init__(self, input_text,  path = '', filename='bloatectomized_file',
                  display=False, style='highlight', output='html', output_numbered_tokens=False, output_original_tokens=False,
@@ -183,29 +185,33 @@ class bloatectomy():
             result_tokens.append(clean_token)
         self.deduplicated_string = self.str_sep.join(result_tokens)
 
-    def tokenize2(regex, token_in):
+    def tokenize2(regex, token_in, token_offset=0):
         """
         Tokenize (2nd time) on  a line feed character.
         1. for each token, split if a line feed character is followed by
         2. a capital letter, or a dash, or a number
+
+        regex must be wrapped in a capture group so that re.split retains the
+        split points and we can reconstruct the start position of each sub-token.
+        Returns a list of (token_string, absolute_start_position) tuples.
         """
-        tok_new = []
+        assert re.fullmatch(r'\(.*\)', regex) is not None, \
+            "regex2 must be wrapped in a single capture group, e.g. r'(?=...)'"
         # find any \n followed by an uppercase letter, a number, or a dash
-        sent_token =re.split(regex, token_in)
-        # replace \n with a space with a space
-        sent_token = [re.sub(r"$\n+","",i) for i in sent_token] # remove from end
-        sent_token = [re.sub(r"^\n", "", i) for i in sent_token] #remove from front
-            # line feeds + whitespace or not
-        sent_token = [re.sub(r"\s+\n\s+", " ", i) for i in sent_token]
-        sent_token = [re.sub(r"\s+\n", " ", i) for i in sent_token]
-        sent_token = [re.sub(r"\n\s+", " ", i) for i in sent_token]
-        sent_token = [re.sub(r"\n", " ", i) for i in sent_token]
-        #remove front/end whitespace
-        sent_token = [i.strip(' ') for i in sent_token]
-        for i in sent_token:
-            if i != '':
-                tok_new.append(i)
-        return tok_new
+        raw_parts = re.split(regex, token_in)
+        pos = 0
+        parts_with_pos = []
+        for part in raw_parts:
+            parts_with_pos.append((part, pos))
+            pos += len(part)
+
+        # Clean each part while preserving the recorded start position
+        cleaned = []
+        for part, start in parts_with_pos:
+            non_ws_span = NON_WHITESPACE_REGEX.search(part)
+            if non_ws_span:
+                cleaned.append((non_ws_span.group(1), token_offset + start + non_ws_span.span(1)[0]))
+        return cleaned
 
     def number_tokens(token):
         """create a list of enumerated (numbered) tokens"""
@@ -218,31 +224,43 @@ class bloatectomy():
         2. Secondary tokenization of each token on line feed character followed by a capital letter, or a number, or a dash.
         3. Add tags to or remove duplicate tokens.
         """
+        assert re.fullmatch(r'\(.*\)', self.regex1, re.DOTALL) is not None, \
+            "regex1 must be wrapped in a single capture group so split points are retained"
         # tokenize 1
-        tok = re.split(self.regex1, self.input_text, flags=re.DOTALL)
-        # whitespace around tokens can cause a duplicate to be missed
-        tok = [i.strip(' ') for i in tok]
-        #tokenize 2
-        new_tok = []
-        for num, t in enumerate(tok):
-            n_tok = bloatectomy.tokenize2(self.regex2, t)
-            new_tok.extend(n_tok)
+        # With a capture group, re.split interleaves separators with non-separator
+        # pieces, so every piece's start position can be recovered by accumulation.
+        raw_parts = re.split(self.regex1, self.input_text, flags=re.DOTALL)
+        pos = 0
+        parts_with_pos = []
+        for part in raw_parts:
+            non_ws_span = NON_WHITESPACE_REGEX.search(part)
+            if non_ws_span:
+                parts_with_pos.append((non_ws_span.group(1), pos + non_ws_span.span(1)[0]))
+            pos += len(part)
+
+        new_tok_with_pos = []
+        for t, offset in parts_with_pos:
+            sub = bloatectomy.tokenize2(self.regex2, t, token_offset=offset)
+            new_tok_with_pos.extend(sub)
+        new_tok, new_tok_positions = zip(*new_tok_with_pos)
+
         # save original data as numbered list
-        self.original_numbered_tokens = []
         self.original_numbered_tokens = list(bloatectomy.number_tokens(new_tok))
-        # detect and mark/remove duplicates
-        self.tokens = []
-        self.tokens = list(bloatectomy.mark_duplicates(self, new_tok))
+
+        # detect and mark/remove duplicates; get back aligned (token, position) pairs
+        self.tokens, self.token_positions = zip(*bloatectomy.mark_duplicates(self, new_tok, new_tok_positions))
+
         # save bloatectomized tokens as a numbered list
-        self.numbered_tokens = []
         self.numbered_tokens = list(bloatectomy.number_tokens(self.tokens))
 
-    def mark_duplicates(self, input_tokens):
+    def mark_duplicates(self, input_tokens, input_positions):
         '''
         Function uses a set() and list to generate each token with tags (of selected style) added to duplicate tokens.
-            INPUT: input_tokens = string of tokenized text (can be sentences, paragraphs, words etc)
+            INPUT: input_tokens    = list of token strings
+                   input_positions = list of integer start positions (parallel to input_tokens)
                    style = ['bold','higlight','remov'] what to do with duplicate text.
-            OUTPUT: yield a single token at a time (generator) until the end of the input_tokens.
+            OUTPUT: yield (token, position) pairs — positions are kept when a token
+                    is yielded (unique or tagged duplicate) and dropped when removed.
     '''
         if self.style == 'bold':
             tag = '<b>'
@@ -259,18 +277,18 @@ class bloatectomy():
         # create hash of tokens
         tokens_set = set()
         tokens_set_add = tokens_set.add
-        for token in input_tokens:
+        for token, position in zip(input_tokens, input_positions):
             #skip any empty tokens
             if token == '':
                 pass
             # tokens matching protected_regex (e.g. timestamped event lines) can
             # legitimately recur and must never be removed/tagged as duplicates
             elif self.protected_regex is not None and self.protected_regex.search(token):
-                yield token
+                yield token, position
             elif token not in tokens_set:
                 tokens_set_add(token)
-                yield token
+                yield token, position
             elif remov == False:
-                yield tag + token + tag_end
+                yield tag + token + tag_end, position
             elif remov == True:
                 pass
